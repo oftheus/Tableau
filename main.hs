@@ -45,6 +45,30 @@ data Formula
 parseFormula :: String -> Either ParseError Formula
 parseFormula = parse parseBiImplicacao ""
 
+-- Parser para bi-implicação
+parseBiImplicacao :: Parser Formula
+parseBiImplicacao = chainr1 parseImplicacao (BiImp <$ (string "↔"))
+
+-- Parser para implicação
+parseImplicacao :: Parser Formula
+parseImplicacao = chainr1 parseOu (Imp <$ (string "→"))
+
+-- Parser para disjunção
+parseOu :: Parser Formula
+parseOu = chainl1 parseE (Ou <$ (char '∨'))
+
+-- Parser para conjunção
+parseE :: Parser Formula
+parseE = chainl1 parseNao (E <$ (char '∧'))
+
+-- Parser para negação
+parseNao :: Parser Formula
+parseNao = (char '¬' *> (Nao <$> parseNao)) <|> parseAtomo
+
+-- Parser para átomos (variável ou expressão entre parênteses)
+parseAtomo :: Parser Formula
+parseAtomo = parseVariavel <|> parseParentese
+
 -- Parser para variáveis
 parseVariavel :: Parser Formula
 parseVariavel = Var <$> letter
@@ -52,30 +76,6 @@ parseVariavel = Var <$> letter
 -- Parser para parênteses
 parseParentese :: Parser Formula
 parseParentese = between (char '(') (char ')') parseBiImplicacao
-
--- Parser para átomos (variável ou expressão entre parênteses)
-parseAtomo :: Parser Formula
-parseAtomo = parseVariavel <|> parseParentese
-
--- Parser para negação
-parseNao :: Parser Formula
-parseNao = (char '¬' *> (Nao <$> parseNao)) <|> parseAtomo
-
--- Parser para conjunção
-parseE :: Parser Formula
-parseE = chainl1 parseNao (E <$ (char '∧'))
-
--- Parser para disjunção
-parseOu :: Parser Formula
-parseOu = chainl1 parseE (Ou <$ (char '∨'))
-
--- Parser para implicação
-parseImplicacao :: Parser Formula
-parseImplicacao = chainr1 parseOu (Imp <$ (string "→"))
-
--- Parser para bi-implicação
-parseBiImplicacao :: Parser Formula
-parseBiImplicacao = chainr1 parseImplicacao (BiImp <$ (string "↔"))
 
 ------------------------------------------------------------------
 ------------------ Definir as regras do Tableau ------------------
