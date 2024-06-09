@@ -17,8 +17,7 @@ main = do
   -- Transformar input (string) num datatype (Formula)
   -- utilizando 'case of' para fazer 'pattern matching' no resultado da função 'parseFormula input'
 
-  --OBS: Usando temporariamente uma fórmula em string abaixo, pois dá erro lendo de arquivo para mim?
-  case parseFormula "a→(a→(b→a))" of
+  case parseFormula input of
     Left erro -> print erro
     Right formula -> do
       let tableau = expandNode [] [] (Nao formula)
