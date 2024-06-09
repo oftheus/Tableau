@@ -2,11 +2,13 @@ import Control.Applicative (liftA2)
 import Text.Parsec
 import Text.Parsec.Char (char, letter)
 import Text.Parsec.String (Parser)
+import Data.Traversable (for)
 
 ------------------------------------------------------------------
 -------------------------- Função Main ---------------------------
 ------------------------------------------------------------------
 
+-- Main: Le uma fórmula de input e a converte
 main :: IO ()
 main = do
   -- Lê o arquivo "input.txt"
@@ -14,29 +16,45 @@ main = do
 
   -- Transformar input (string) num datatype (Formula)
   -- utilizando 'case of' para fazer 'pattern matching' no resultado da função 'parseFormula input'
-  case parseFormula input of
+
+  --OBS: Usando temporariamente uma fórmula em string abaixo, pois dá erro lendo de arquivo para mim?
+  case parseFormula "a→(a→(b→a))" of
     Left erro -> print erro
     Right formula -> do
-      putStrLn ("Fórmula Original: " ++ show formula)
+      let tableau = expandNode [] [] (Nao formula)
+      putStrLn $ "Arvore tableau para: " ++ show formula
+      putStrLn $ show tableau
+      putStrLn $ "Tautologia: " ++ show (detectValidade [tableau])
 
 ------------------------------------------------------------------
 ---------- Definição da estrutura de dados da fórmula ------------
 ------------------------------------------------------------------
 
+-- Tipo fórmula, usado para representar as fórmulas de uma maneira mais fácil de tratar
 data Formula
-  = Var Char -- Variável proposicional representada por um caractere
-  | Nao Formula -- Negação de uma fórmula
-  | E Formula Formula -- Conjunção (E) de duas fórmulas
-  | Ou Formula Formula -- Disjunção (OU) de duas fórmulas
-  | Imp Formula Formula -- Implicação de uma fórmula para outra
-  deriving (Show, Eq)
+  = Var Char
+  | Nao Formula
+  | E Formula Formula
+  | Ou Formula Formula
+  | Imp Formula Formula
+  deriving (Eq)
+
+-- Mostra formula como string mais facilmente legível, para facilitar depuração
+instance Show Formula where
+  show :: Formula -> String
+  show (Var c) = [c]
+  show (Nao f) = "~" ++ show f
+  show (E f1 f2) = "(" ++ show f1 ++ " ^ " ++ show f2 ++ ")"
+  show (Ou f1 f2) = "(" ++ show f1 ++ " v " ++ show f2 ++ ")"
+  show (Imp f1 f2) = "(" ++ show f1 ++ " -> " ++ show f2 ++ ")"
 
 -----------------------------------------------------------------
 --- Função principal para converter uma string em uma fórmula ---
 -----------------------------------------------------------------
 
--- ORDEM DE PRECEDÊNCIA: ¬, ∧, ∨, →
+-- ORDEM DE PRECEDÊNCIA: ¬, ∧, ∨, →, ↔
 
+-- Função principal para converter uma string em uma fórmula
 parseFormula :: String -> Either ParseError Formula
 parseFormula = parse parseImplicacao ""
 
@@ -68,42 +86,87 @@ parseVariavel = Var <$> letter
 parseParentese :: Parser Formula
 parseParentese = between (char '(') (char ')') parseImplicacao
 
-------------------------------------------------------------------
------------------- Definir as regras do Tableau ------------------
-------------------------------------------------------------------
+-----------------------------------------------------------------
+--- Estrutura de dados para a árvore em si                    ---
+-----------------------------------------------------------------
 
--- Usar a função "simplificar" para aplicar uma regra, e se a fórmula resultante
---      for igual à fórmula original, retorna a fórmula.
---      Caso contrário, aplica as regras novamente à fórmula simplificada.
+-- Tipo para os nós da árvoore do tableau
+data Node = Node {
+  formula :: Formula,   --Rotulado pela fórmula que armazena
+                        --(OBS: Uma fórmula com validade false é arm)
 
--- Simplificar a fórmula aplicando as regras
-simplificar :: Formula -> Formula
-simplificar (Nao (Nao a)) = simplificar a -- ~(~A) = A
-simplificar (Ou a b) = Ou (simplificar a) (simplificar b) -- A v B
-simplificar (E a b) = E (simplificar a) (simplificar b) -- A ^ B
-simplificar (Nao (Ou a b)) = E (simplificar (Nao a)) (simplificar (Nao b)) -- ~(A v B) = ~A ^ ~B
-simplificar (Nao (E a b)) = Ou (simplificar (Nao a)) (simplificar (Nao b)) -- ~(A ^ B) = ~A v ~B
-simplificar (Imp a b) = Ou (simplificar (Nao a)) (simplificar b) -- (A -> B) = ~A v B
-simplificar (Nao (Imp a b)) = E (simplificar a) (simplificar (Nao b)) -- ~(A -> B) = A ^ ~B
-simplificar f = f -- Caso base: se nenhuma regra se aplica, retorna a fórmula como está
+  branch :: [Formula],  --Todas as fórmulas entre ela e a raíz da árvore. 
+                        --Não nescessário, mais usado para facilitar o processo de verificação de válidade 
+  
+  children :: [Node]    --Os nós filhos desse nó. Pode ser [] se for uma folha.
+} deriving (Eq)
 
-------------------------------------------------------------------
----------- Definir uma estrutura de dados pro Tableau ------------
----------- para representar se o nó é interno ou folha -----------
-------------------------------------------------------------------
+-- Overwrite para o show do nó, de forma a mostrar a árvore a partir desse nó de maneira legível e mais facilmente depurável
+instance Show Node where
+  show :: Node -> String
+  show  = showNode 0 
+    where
+      showNode :: Int -> Node -> String
+      showNode indent (Node f _ children) =
+        show indent ++ ": " ++ replicate (indent * 3) ' ' ++ show f ++ showChildren indent children
+
+      showChildren :: Int -> [Node] -> String
+      showChildren _ [] = "  [[Folha]]\n"
+      showChildren indent children = "\n" ++ concatMap (showNode (indent + 1)) children 
+
+-----------------------------------------------------------------
+--- Criação da árvore de refutação através de uma fórmuka     ---
+-----------------------------------------------------------------
+
+-- Expande um nó, criando o nó
+expandNode :: [Formula] -> [Formula] -> Formula -> Node
+expandNode branch backlog f =
+  let newBranch = [f] ++ branch
+  in if temContradicao newBranch
+     then Node f newBranch [] -- Para
+     else Node f newBranch (expandChildren newBranch backlog f) --Continua
+
+--Expande um nó, criando apenas seus filhos
+expandChildren :: [Formula] -> [Formula] -> Formula -> [Node]
+--Casos base: variáveis simples e nenhuma operação no backlog para ser feita
+expandChildren _ [] (Var _) = []
+expandChildren _ [] (Nao (Var _)) = []
+
+--Caso var atômicas e backlog: Coloca as fórmulas do backlog como filhas da atual
+expandChildren branch backlog (Var _) = expandChildren branch (tail backlog) (head backlog)
+expandChildren branch backlog (Nao (Var _)) = expandChildren branch (tail backlog) (head backlog) 
+    
+--Caso &: variáveis simples e nenhuma operação no backlog para ser feita
+expandChildren branch backlog (E p q) = [Node p branch [Node q newBranch (expandChildren (newBranch++[q]) (backlog++[p]) q)]]
+                              where newBranch = branch ++ [p]
+   
+--Caso ^: cria duas branches
+expandChildren branch backlog (Ou p q) = [expandNode branch backlog p, expandNode branch backlog q]
+
+--Caso ->: cria duas branches, uma com não p e outra com não q
+expandChildren branch backlog (Imp p q) = [expandNode branch backlog (Nao p), expandNode branch backlog q]
+
+--Casos de negação não atômicas: converte para um dois anteriores, 
+--pulando o nó intermediario em si e colocando apenas suas crianças na árvore
+expandChildren branch backlog (Nao (Nao p)) = [expandNode branch backlog p]
+expandChildren branch backlog (Nao (E p q)) = expandChildren branch backlog (Ou (Nao p) (Nao q))
+expandChildren branch backlog (Nao (Ou p q)) = expandChildren branch backlog (E (Nao p) (Nao q))
+expandChildren branch backlog (Nao (Imp p q)) = expandChildren branch backlog (E p (Nao q))
 
 
+-----------------------------------------------------------------
+--- Verificação de se há contradições em uma árvore           ---
+-----------------------------------------------------------------
 
-------------------------------------------------------------------
------  Construir árvore do Tableau, o nó raiz será a negação -----
----- da fórmula inicial, Deve-se expandir o nó aplicando as   ----
-----     regras até que não seja mais possível expandir       ----
-------------------------------------------------------------------
+-- Dado uma lista de fórmula, verifica se há contradição
+temContradicao :: [Formula] -> Bool
+temContradicao [] = False
+temContradicao (f:fs) = (Nao f `elem` fs) || (case f of { Nao x -> x `elem` fs; _ -> False }) || temContradicao fs
 
-
-
-------------------------------------------------------------------
--------  Verificar se cada nó do ramo é fechado.          --------
------- Se todos forem fechados a fórmula é válida.         -------
------- Se no mínimo um nó for aberto a fórmula é inválida. -------
-------------------------------------------------------------------
+detectValidade :: [Node] -> Bool
+--Caso base
+detectValidade [(Node p branch [])] = temContradicao ([p] ++ branch)
+--Para nó com 1 ou 2 filhos:
+detectValidade [(Node _ _ children)] = detectValidade [childF] && detectValidade(tail children)
+                                                where childF = head children
+detectValidade _ = True  --Caso quando a função é chamado para o [], em por exemplo um nó que tem apenas 1 filho
