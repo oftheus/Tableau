@@ -52,7 +52,7 @@ instance Show Formula where
 -- ORDEM DE PRECEDÊNCIA: ¬, ∧, ∨, →
 
 parseFormula :: String -> Either ParseError Formula
-parseFormula = parse parseImplicacao ""
+parseFormula input = parse parseImplicacao "" input
 
 -- Parser para implicação
 parseImplicacao :: Parser Formula
