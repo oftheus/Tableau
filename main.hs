@@ -1,17 +1,27 @@
 import Control.Applicative (liftA2)
 import Data.Traversable (for)
 import Text.Parsec
+    ( char,
+      letter,
+      between,
+      chainl1,
+      chainr1,
+      (<|>),
+      parse,
+      ParseError )
 import Text.Parsec.Char (char, letter)
 import Text.Parsec.String (Parser)
 
 ------------------------------------------------------------------
 -------------------------- Função Main ---------------------------
 ------------------------------------------------------------------
+main :: IO () --roda input1 como exemplo
+main = do verify 1
 
-main :: IO ()
-main = do
+verify :: Int -> IO ()
+verify file = do
   -- Lê o arquivo "input.txt"
-  input <- readFile "inputs/input1.txt"
+  input <- readFile ("inputs/input" ++ show file ++ ".txt")
 
   -- Transformar input (string) num datatype (Formula)
   -- utilizando 'case of' para fazer 'pattern matching' no resultado da função 'parseFormula input'
@@ -19,11 +29,24 @@ main = do
     Left erro -> print erro
     Right formula -> do
       let tableau = expandNode [] [] (Nao formula)
-      putStrLn $ "Fórmula: " ++ show formula ++ "\n"
-      putStrLn $ "Árvore:" ++ "\n"
+      putStrLn $ "Formula: " ++ show formula ++ "\n"
+      putStrLn $ "Arvore:" ++ "\n"
       putStrLn $ show tableau
       putStrLn $ "Tautologia: " ++ show (detectValidade [tableau])
 
+verifyFormula :: String -> IO ()
+verifyFormula inputFormula = do
+
+  -- Transformar input (string) num datatype (Formula)
+  -- utilizando 'case of' para fazer 'pattern matching' no resultado da função 'parseFormula input'
+  case parseFormula inputFormula of
+    Left erro -> print erro
+    Right formula -> do
+      let tableau = expandNode [] [] (Nao formula)
+      putStrLn $ "Formula: " ++ show formula ++ "\n"
+      putStrLn $ "Arvore:" ++ "\n"
+      putStrLn $ show tableau
+      putStrLn $ "Tautologia: " ++ show (detectValidade [tableau])
 ------------------------------------------------------------------
 ---------- Definição da estrutura de dados da fórmula ------------
 ------------------------------------------------------------------
@@ -40,10 +63,10 @@ data Formula
 instance Show Formula where
   show :: Formula -> String
   show (Var c) = [c]
-  show (Nao f) = "¬" ++ show f
+  show (Nao f) = "~" ++ show f
   show (E f1 f2) = "(" ++ show f1 ++ " ^ " ++ show f2 ++ ")"
   show (Ou f1 f2) = "(" ++ show f1 ++ " v " ++ show f2 ++ ")"
-  show (Imp f1 f2) = "(" ++ show f1 ++ " → " ++ show f2 ++ ")"
+  show (Imp f1 f2) = "(" ++ show f1 ++ " -> " ++ show f2 ++ ")"
 
 -----------------------------------------------------------------
 --- Função principal para converter uma string em uma fórmula ---
@@ -56,19 +79,19 @@ parseFormula input = parse parseImplicacao "" input
 
 -- Parser para implicação
 parseImplicacao :: Parser Formula
-parseImplicacao = chainr1 parseOu (Imp <$ char '→')
+parseImplicacao = chainr1 parseOu (Imp <$ char ':')
 
 -- Parser para disjunção
 parseOu :: Parser Formula
-parseOu = chainl1 parseE (Ou <$ char '∨')
+parseOu = chainl1 parseE (Ou <$ char 'v')
 
 -- Parser para conjunção
 parseE :: Parser Formula
-parseE = chainl1 parseNao (E <$ char '∧')
+parseE = chainl1 parseNao (E <$ char '^')
 
 -- Parser para negação
 parseNao :: Parser Formula
-parseNao = (char '¬' *> (Nao <$> parseNao)) <|> parseAtomo
+parseNao = (char '~' *> (Nao <$> parseNao)) <|> parseAtomo
 
 -- Parser para átomos (variável ou expressão entre parênteses)
 parseAtomo :: Parser Formula
@@ -89,7 +112,7 @@ parseParentese = between (char '(') (char ')') parseImplicacao
 -- Tipo para os nós da árvore do tableau
 data Node = Node
   { formula :: Formula, -- Rotulado pela fórmula que armazena
-  -- (OBS: Uma fórmula com validade false é arm)
+  -- (OBS: Uma fórmula com validade false é armazenada como negação)
     branch :: [Formula], -- Todas as fórmulas entre ela e a raiz da árvore.
     -- Não necessário, mais usado para facilitar o processo de verificação de validade
     children :: [Node] -- Os nós filhos desse nó. Pode ser [] se for uma folha.
