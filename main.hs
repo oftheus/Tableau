@@ -28,7 +28,7 @@ verify file = do
   case parseFormula input of
     Left erro -> print erro
     Right formula -> do
-      let tableau = expandNode [] [] (Nao formula)
+      let tableau = expandNode [] [] (F formula)
       putStrLn $ "Formula: " ++ show formula ++ "\n"
       putStrLn $ "Arvore:" ++ "\n"
       putStrLn $ show tableau
@@ -42,11 +42,12 @@ verifyFormula inputFormula = do
   case parseFormula inputFormula of
     Left erro -> print erro
     Right formula -> do
-      let tableau = expandNode [] [] (Nao formula)
+      let tableau = expandNode [] [] (F formula)
       putStrLn $ "Formula: " ++ show formula ++ "\n"
       putStrLn $ "Arvore:" ++ "\n"
       putStrLn $ show tableau
       putStrLn $ "Tautologia: " ++ show (detectValidade [tableau])
+
 ------------------------------------------------------------------
 ---------- Definição da estrutura de dados da fórmula ------------
 ------------------------------------------------------------------
@@ -67,6 +68,17 @@ instance Show Formula where
   show (E f1 f2) = "(" ++ show f1 ++ " ^ " ++ show f2 ++ ")"
   show (Ou f1 f2) = "(" ++ show f1 ++ " v " ++ show f2 ++ ")"
   show (Imp f1 f2) = "(" ++ show f1 ++ " -> " ++ show f2 ++ ")"
+
+-- Formula, atualizada para poder ser V ou F
+data FormulaVF
+  = V Formula 
+  | F Formula
+  deriving (Eq)
+
+instance Show FormulaVF where
+  show :: FormulaVF -> String
+  show (V f) = "V: " ++ show f 
+  show (F f) = "F: " ++ show f
 
 -----------------------------------------------------------------
 --- Função principal para converter uma string em uma fórmula ---
@@ -111,9 +123,9 @@ parseParentese = between (char '(') (char ')') parseImplicacao
 
 -- Tipo para os nós da árvore do tableau
 data Node = Node
-  { formula :: Formula, -- Rotulado pela fórmula que armazena
+  { formula :: FormulaVF, -- Rotulado pela fórmula que armazena
   -- (OBS: Uma fórmula com validade false é armazenada como negação)
-    branch :: [Formula], -- Todas as fórmulas entre ela e a raiz da árvore.
+    branch :: [FormulaVF], -- Todas as fórmulas entre ela e a raiz da árvore.
     -- Não necessário, mais usado para facilitar o processo de verificação de validade
     children :: [Node] -- Os nós filhos desse nó. Pode ser [] se for uma folha.
   }
@@ -137,7 +149,7 @@ instance Show Node where
 -----------------------------------------------------------------
 
 -- Expande um nó, criando o nó
-expandNode :: [Formula] -> [Formula] -> Formula -> Node
+expandNode :: [FormulaVF] -> [FormulaVF] -> FormulaVF -> Node
 expandNode branch backlog f =
   let newBranch = [f] ++ branch
    in if temContradicao newBranch
@@ -145,37 +157,43 @@ expandNode branch backlog f =
         else Node f newBranch (expandChildren newBranch backlog f) -- Continua
 
 -- Expande um nó, criando apenas seus filhos
-expandChildren :: [Formula] -> [Formula] -> Formula -> [Node]
+expandChildren :: [FormulaVF] -> [FormulaVF] -> FormulaVF -> [Node]
 -- Casos base: variáveis simples e nenhuma operação no backlog para ser feita
-expandChildren _ [] (Var _) = []
-expandChildren _ [] (Nao (Var _)) = []
+expandChildren _ [] (V (Var _)) = []
+expandChildren _ [] (F (Var _)) = []
 -- Caso var atômicas e backlog: Coloca as fórmulas do backlog como filhas da atual
-expandChildren branch backlog (Var _) = expandChildren branch (tail backlog) (head backlog)
-expandChildren branch backlog (Nao (Var _)) = expandChildren branch (tail backlog) (head backlog)
+expandChildren branch backlog (V (Var _)) = expandChildren branch (tail backlog) (head backlog)
+expandChildren branch backlog (F (Var _)) = expandChildren branch (tail backlog) (head backlog)
 -- Caso &: variáveis simples e nenhuma operação no backlog para ser feita
-expandChildren branch backlog (E p q) = [Node p branch [Node q newBranch (expandChildren (newBranch ++ [q]) (backlog ++ [p]) q)]]
+expandChildren branch backlog (V (E p q)) = [Node (V p) branch [Node (V q) newBranch (expandChildren (newBranch ++ [(V q)]) (backlog ++ [(V p)]) (V q))]]
   where
-    newBranch = branch ++ [p]
-
+    newBranch = branch ++ [V p]
+expandChildren branch backlog (F (E p q)) = [expandNode branch backlog (F p), expandNode branch backlog (F q)]
 -- Caso ^: cria duas branches
-expandChildren branch backlog (Ou p q) = [expandNode branch backlog p, expandNode branch backlog q]
+expandChildren branch backlog (V (Ou p q)) = [expandNode branch backlog (V p), expandNode branch backlog (V q)]
+expandChildren branch backlog (F (Ou p q)) =  [Node (F p) branch [Node (F q) newBranch (expandChildren (newBranch ++ [(F q)]) (backlog ++ [(F p)]) (F q))]]
+  where
+    newBranch = branch ++ [F p]
 -- Caso ->: cria duas branches, uma com não p e outra com não q
-expandChildren branch backlog (Imp p q) = [expandNode branch backlog (Nao p), expandNode branch backlog q]
--- Casos de negação não atômicas: converte para um dois anteriores,
+expandChildren branch backlog (V (Imp p q)) = [expandNode branch backlog (F p), expandNode branch backlog (V q)]
+expandChildren branch backlog (F (Imp p q)) = [Node (V p) branch [Node (F q) newBranch (expandChildren (newBranch ++ [(F q)]) (backlog ++ [(V p)]) (F q))]]
+  where
+    newBranch = branch ++ [V p]
+-- Casos de negação não atômicas: converte para um dos anteriores,
 -- pulando o nó intermediário em si e colocando apenas suas crianças na árvore
-expandChildren branch backlog (Nao (Nao p)) = [expandNode branch backlog p]
-expandChildren branch backlog (Nao (E p q)) = expandChildren branch backlog (Ou (Nao p) (Nao q))
-expandChildren branch backlog (Nao (Ou p q)) = expandChildren branch backlog (E (Nao p) (Nao q))
-expandChildren branch backlog (Nao (Imp p q)) = expandChildren branch backlog (E p (Nao q))
+expandChildren branch backlog (V (Nao p)) = [expandNode branch backlog (F p)]
+expandChildren branch backlog (F (Nao p)) = [expandNode branch backlog (V p)]
 
 -----------------------------------------------------------------
 -------- Verificação de se há contradições em uma árvore --------
 -----------------------------------------------------------------
 
 -- Dado uma lista de fórmula, verifica se há contradição
-temContradicao :: [Formula] -> Bool
+temContradicao :: [FormulaVF] -> Bool
 temContradicao [] = False
-temContradicao (f : fs) = (Nao f `elem` fs) || (case f of Nao x -> x `elem` fs; _ -> False) || temContradicao fs
+temContradicao (f : fs) = case f of
+  V x -> (F x `elem` fs) || temContradicao fs
+  F x -> (V x `elem` fs) || temContradicao fs
 
 detectValidade :: [Node] -> Bool
 -- Caso base
